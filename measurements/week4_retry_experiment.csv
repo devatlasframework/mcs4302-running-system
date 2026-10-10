@@ -1,0 +1,13 @@
+condition,seed,n,success_pct,mean_ms,p95_ms,http_calls
+"A: fail 0.3, no retry",42,50,62.0,66,95,50
+"B: fail 0.3, retry",42,50,98.0,232,800,74
+"C: fail 0.6, no retry",42,50,32.0,67,95,50
+"D: fail 0.6, retry",42,50,88.0,657,1846,115
+"A: fail 0.3, no retry",43,50,76.0,67,97,50
+"B: fail 0.3, retry",43,50,98.0,195,394,71
+"C: fail 0.6, no retry",43,50,50.0,67,94,50
+"D: fail 0.6, retry",43,50,92.0,443,1558,100
+"A: fail 0.3, no retry",44,50,62.0,63,93,50
+"B: fail 0.3, retry",44,50,100.0,259,1600,76
+"C: fail 0.6, no retry",44,50,38.0,62,92,50
+"D: fail 0.6, retry",44,50,92.0,651,1748,118
