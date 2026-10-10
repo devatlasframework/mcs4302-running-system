@@ -1,0 +1,13 @@
+# Python backend
+backend/.venv/
+__pycache__/
+*.pyc
+
+# Local lab tooling, logs and evidence (not part of the system)
+shots/
+*.log
+*.pid
+adbh.sh
+time_refresh.py
+start_backend.ps1
+stop_backend.ps1
