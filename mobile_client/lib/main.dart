@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'api/api_client.dart';
+import 'api/api_exceptions.dart';
 import 'models/item.dart';
 
 void main() => runApp(const App());
@@ -41,7 +42,9 @@ class _ItemsScreenState extends State<ItemsScreen> {
   }
 
   void _refresh() {
-    if (mounted) setState(() => _future = api.getItems());
+    // Block body: an arrow closure would return the Future to setState(),
+    // which fails a debug assertion and skips the rebuild.
+    if (mounted) setState(() { _future = api.getItems(); });
   }
 
   Future<void> _addItem() async {
@@ -97,6 +100,34 @@ class _ItemsScreenState extends State<ItemsScreen> {
       if (mounted) setState(() => _busy = false);
     }
   }
+
+  // Part 3: quick tests of the fault-injection endpoints.
+  Future<void> _runTest(String which) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    String msg;
+    try {
+      switch (which) {
+        case 'slow':
+          await api.getSlow(3);
+        case 'flaky':
+          await api.getFlaky(0.3);
+        case 'bad':
+          await api.getBadJson();
+      }
+      msg = 'OK';
+    } on ApiException catch (e) {
+      msg = '$e (retryable: ${e.retryable})';
+    } catch (e) {
+      msg = 'Test failed: $e';
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text('$which -> $msg')));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -104,6 +135,15 @@ class _ItemsScreenState extends State<ItemsScreen> {
         title: const Text('Items'),
         actions: [
           IconButton(icon: const Icon(Icons.refresh), onPressed: _busy ? null : _refresh),
+          PopupMenuButton<String>(
+            enabled: !_busy,
+            onSelected: _runTest,
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'slow', child: Text('Test /slow (3 s)')),
+              PopupMenuItem(value: 'flaky', child: Text('Test /flaky (30%)')),
+              PopupMenuItem(value: 'bad', child: Text('Test /bad-json')),
+            ],
+          ),
         ],
       ),
       floatingActionButton: FloatingActionButton(
