@@ -26,3 +26,14 @@ flutter run
 The emulator reaches the host at `http://10.0.2.2:8000` (`lib/config.dart`).
 Plain HTTP is allowed in `AndroidManifest.xml` for this local lab only and is
 removed when HTTPS is enabled in Week 9.
+
+## Week 4 results
+
+Raw output of the Part 5 retry experiment (seeds 42, 43, 44) is in
+`measurements/week4_retry_experiment.csv`, one row per condition per run, as
+copied from the app's **Copy CSV** button.
+
+Note: `lib/main.dart` uses `setState(() { _future = api.getItems(); })` rather
+than the code pack's arrow form `setState(() => _future = ...)`. The arrow
+closure returns the Future, which fails a debug assertion in `setState` and
+skips the rebuild, so the refresh button never updated the screen.
