@@ -101,6 +101,28 @@ class _ItemsScreenState extends State<ItemsScreen> {
     }
   }
 
+  // Part 4: idempotency test - 10 creates with a 50% "lost response" rate.
+  Future<void> _idempotencyTest(bool useKey) async {
+    // Let any earlier refresh finish before resetting the random stream.
+    try { await _future; } catch (_) {}
+    await api.reset(42);
+    var failed = 0;
+    for (var i = 0; i < 10; i++) {
+      try {
+        await api.createItem('Test $i', 1,
+            failRate: 0.5, useIdempotencyKey: useKey);
+      } on ApiException {
+        failed++;
+      }
+    }
+    final created = (await api.getItems()).length - 2; // 2 seeded items
+    _refresh();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Key ${useKey ? "ON" : "OFF"}: 10 creates requested, '
+            '${created - 10} duplicates, $created created, $failed reported failed')));
+  }
+
   // Part 3: quick tests of the fault-injection endpoints.
   Future<void> _runTest(String which) async {
     if (_busy) return;
@@ -114,6 +136,12 @@ class _ItemsScreenState extends State<ItemsScreen> {
           await api.getFlaky(0.3);
         case 'bad':
           await api.getBadJson();
+        case 'idem-off':
+          await _idempotencyTest(false);
+          return;
+        case 'idem-on':
+          await _idempotencyTest(true);
+          return;
       }
       msg = 'OK';
     } on ApiException catch (e) {
@@ -142,6 +170,10 @@ class _ItemsScreenState extends State<ItemsScreen> {
               PopupMenuItem(value: 'slow', child: Text('Test /slow (3 s)')),
               PopupMenuItem(value: 'flaky', child: Text('Test /flaky (30%)')),
               PopupMenuItem(value: 'bad', child: Text('Test /bad-json')),
+              PopupMenuItem(
+                  value: 'idem-off', child: Text('Idempotency test: key OFF')),
+              PopupMenuItem(
+                  value: 'idem-on', child: Text('Idempotency test: key ON')),
             ],
           ),
         ],

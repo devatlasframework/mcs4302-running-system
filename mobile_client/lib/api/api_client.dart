@@ -1,4 +1,4 @@
-// PART 3 version: timeouts, 4xx/5xx and malformed JSON handled. No retry yet.
+// FINAL version (Part 4 onward): retry with backoff + idempotency keys.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import '../config.dart';
 import '../models/item.dart';
 import 'api_exceptions.dart';
+import 'retry.dart';
 
 class ApiClient {
   final http.Client _http;
@@ -17,9 +18,13 @@ class ApiClient {
     if (_ownsClient) _http.close();
   }
   final Duration timeout;
+  final RetryPolicy retryPolicy;
 
-  ApiClient({http.Client? client, this.timeout = const Duration(seconds: 2)})
-      : _ownsClient = client == null, _http = client ?? http.Client();
+  ApiClient({
+    http.Client? client,
+    this.timeout = const Duration(seconds: 2),
+    this.retryPolicy = const RetryPolicy(),
+  }) : _ownsClient = client == null, _http = client ?? http.Client();
 
   Uri _uri(String path, [Map<String, String>? query]) =>
       Uri.parse('$baseUrl$path').replace(queryParameters: query);
@@ -86,19 +91,32 @@ class ApiClient {
     }
   }
 
-  Future<List<Item>> getItems() async {
-    final res = await _send(() => _http.get(_uri('/items')));
-    return _items(res);
-  }
+  Future<List<Item>> getItems() => withRetry(() async {
+        final res = await _send(() => _http.get(_uri('/items')));
+        return _items(res);
+      }, retryPolicy);
 
-  Future<Item> createItem(String name, double price) async {
+  /// POST is only safe to retry because every attempt carries the SAME key.
+  Future<Item> createItem(
+    String name,
+    double price, {
+    double failRate = 0,
+    bool useIdempotencyKey = true,
+  }) {
     _checkItem(name, price);
-    final res = await _send(() => _http.post(
-          _uri('/items'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'name': name, 'price': price}),
-        ));
-    return _itemValue(_decode(res));
+    // Generated once, OUTSIDE the retry loop.
+    final key = useIdempotencyKey ? newIdempotencyKey() : null;
+    return withRetry(() async {
+      final res = await _send(() => _http.post(
+            _uri('/items', failRate > 0 ? {'fail_rate': '$failRate'} : null),
+            headers: {
+              'Content-Type': 'application/json',
+              if (key != null) 'Idempotency-Key': key,
+            },
+            body: jsonEncode({'name': name, 'price': price}),
+          ));
+      return _itemValue(_decode(res));
+    }, retryPolicy);
   }
 
   // ---- Fault-injection test endpoints ----
@@ -106,12 +124,22 @@ class ApiClient {
     _decode(await _send(() => _http.get(_uri('/slow', {'delay': '$delay'}))));
   }
 
-  Future<void> getFlaky(double failRate) async {
-    _decode(await _send(
-        () => _http.get(_uri('/flaky', {'fail_rate': '$failRate'}))));
-  }
+  Future<void> getFlaky(
+    double failRate, {
+    RetryPolicy? policy,
+    void Function()? onAttempt,
+  }) =>
+      withRetry(() async {
+        _decode(await _send(
+            () => _http.get(_uri('/flaky', {'fail_rate': '$failRate'}))));
+      }, policy ?? retryPolicy, onAttempt: onAttempt);
 
   Future<void> getBadJson() async {
     _decode(await _send(() => _http.get(_uri('/bad-json'))));
+  }
+
+  /// Resets the backend's items and random seed (repeatable experiments).
+  Future<void> reset(int seed) async {
+    await _send(() => _http.post(_uri('/reset', {'seed': '$seed'})));
   }
 }
