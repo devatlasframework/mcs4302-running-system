@@ -2,13 +2,17 @@ import 'package:flutter/material.dart';
 
 import 'api/api_client.dart';
 import 'api/api_exceptions.dart';
+import 'background_jobs.dart';
 import 'experiment_screen.dart';
+import 'jobs_screen.dart';
 import 'lifecycle_log.dart';
 import 'models/item.dart';
 import 'notifications.dart';
 
-void main() {
+Future<void> main() async {
   LifecycleLog.add('process started: main()');
+  WidgetsFlutterBinding.ensureInitialized();
+  await BackgroundJobs.init(); // Week 5 Part 4: register the job entry point
   runApp(const App());
 }
 
@@ -89,6 +93,9 @@ class _ItemsScreenState extends State<ItemsScreen>
         showLifecycleLog(context);
       case 'notify':
         _notificationCheck();
+      case 'jobs':
+        Navigator.push(context,
+            MaterialPageRoute(builder: (_) => JobsScreen(api: api)));
       default:
         _runTest(which);
     }
@@ -129,17 +136,15 @@ class _ItemsScreenState extends State<ItemsScreen>
         final granted = await Notifications.request();
         sw.stop();
         msg = 'Request returned $granted after ${sw.elapsedMilliseconds} ms';
-        // TODO 3: a refusal is final from the app's side, so point the user at
-        //         the one place they can change it: the app's settings page.
-        if (!granted) {
-          LifecycleLog.add(msg);
-          if (!mounted) return;
+        if (!granted && mounted) {
+          // Refused: tell the user how to fix it themselves.
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('$msg. Notifications are off: you can turn them '
-                'on in the app settings.'),
+            content: const Text('Notifications are off. You can turn them on '
+                'in the app settings.'),
             action: SnackBarAction(
                 label: 'Settings', onPressed: Notifications.openSettings),
           ));
+          LifecycleLog.add(msg);
           return;
         }
       case 'test':
@@ -284,6 +289,7 @@ class _ItemsScreenState extends State<ItemsScreen>
             itemBuilder: (_) => const [
               PopupMenuItem(value: 'lifelog', child: Text('Lifecycle log')),
               PopupMenuItem(value: 'notify', child: Text('Notifications')),
+              PopupMenuItem(value: 'jobs', child: Text('Background jobs')),
               PopupMenuDivider(),
               PopupMenuItem(value: 'slow', child: Text('Test /slow (3 s)')),
               PopupMenuItem(value: 'flaky', child: Text('Test /flaky (30%)')),
