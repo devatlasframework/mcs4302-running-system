@@ -17,6 +17,8 @@ class App extends StatelessWidget {
   @override
   Widget build(BuildContext context) => MaterialApp(
         title: 'MCS4302 Running System',
+        // Week 5 Part 2: turns on state restoration for the whole app.
+        restorationScopeId: 'app',
         theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),
         home: const ItemsScreen(),
       );
@@ -30,19 +32,36 @@ class ItemsScreen extends StatefulWidget {
 }
 
 // Week 5 Part 1: WidgetsBindingObserver delivers app lifecycle changes.
-class _ItemsScreenState extends State<ItemsScreen> with WidgetsBindingObserver {
+// Week 5 Part 2: RestorationMixin saves small UI state that Android hands
+// back after it kills and recreates the process.
+class _ItemsScreenState extends State<ItemsScreen>
+    with WidgetsBindingObserver, RestorationMixin {
   final api = ApiClient();
   late Future<List<Item>> _future;
   bool _busy = false;
 
-  // UI state that exists ONLY in memory. Part 2 tests whether it survives.
-  final _draft = TextEditingController();
-  bool _sortByPrice = false;
+  // Part 2: the same UI state, now restorable. Android stores it in the
+  // saved instance state (a small bundle), not in a database.
+  final _draft = RestorableTextEditingController();
+  final _sortByPrice = RestorableBool(false);
+
+  @override
+  String? get restorationId => 'items_screen';
+
+  @override
+  void restoreState(RestorationBucket? oldBucket, bool initialRestore) {
+    // TODO 2: register both properties under stable, unique ids. On a fresh
+    //         start they keep their defaults; after process death Android
+    //         hands back the saved bundle and they are filled from it.
+    registerForRestoration(_draft, 'draft');
+    registerForRestoration(_sortByPrice, 'sort_by_price');
+    LifecycleLog.add('restoreState: draft="${_draft.value.text}", '
+        'sortByPrice=${_sortByPrice.value}');
+  }
 
   @override
   void initState() {
     super.initState();
-    // TODO 1a: observe app lifecycle changes from now on.
     WidgetsBinding.instance.addObserver(this);
     LifecycleLog.add('ItemsScreen created (initState)');
     _future = api.getItems();
@@ -51,9 +70,9 @@ class _ItemsScreenState extends State<ItemsScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     LifecycleLog.add('ItemsScreen disposed');
-    // TODO 1b: stop observing, or the binding keeps a dead State alive.
     WidgetsBinding.instance.removeObserver(this);
     _draft.dispose();
+    _sortByPrice.dispose();
     api.close();
     super.dispose();
   }
@@ -62,7 +81,6 @@ class _ItemsScreenState extends State<ItemsScreen> with WidgetsBindingObserver {
   /// resumed, inactive, hidden, paused or detached.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // TODO 1c: record every transition, in order, with a timestamp.
     LifecycleLog.add('state -> ${state.name}');
   }
 
@@ -235,17 +253,17 @@ class _ItemsScreenState extends State<ItemsScreen> with WidgetsBindingObserver {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
           child: TextField(
-            controller: _draft,
+            controller: _draft.value,
             decoration: const InputDecoration(
-              labelText: 'Draft note (kept in memory only)',
+              labelText: 'Draft note (restorable)',
               border: OutlineInputBorder(),
             ),
           ),
         ),
         SwitchListTile(
           title: const Text('Sort by price'),
-          value: _sortByPrice,
-          onChanged: (v) => setState(() => _sortByPrice = v),
+          value: _sortByPrice.value,
+          onChanged: (v) => setState(() => _sortByPrice.value = v),
         ),
         const Divider(height: 1),
         Expanded(child: _itemList()),
@@ -269,7 +287,7 @@ class _ItemsScreenState extends State<ItemsScreen> with WidgetsBindingObserver {
             );
           }
           final items = [...snap.data!];
-          if (_sortByPrice) items.sort((a, b) => a.price.compareTo(b.price));
+          if (_sortByPrice.value) items.sort((a, b) => a.price.compareTo(b.price));
           return ListView.builder(
             itemCount: items.length,
             itemBuilder: (_, i) => ListTile(
