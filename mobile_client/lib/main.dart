@@ -5,6 +5,7 @@ import 'api/api_exceptions.dart';
 import 'experiment_screen.dart';
 import 'lifecycle_log.dart';
 import 'models/item.dart';
+import 'notifications.dart';
 
 void main() {
   LifecycleLog.add('process started: main()');
@@ -50,9 +51,6 @@ class _ItemsScreenState extends State<ItemsScreen>
 
   @override
   void restoreState(RestorationBucket? oldBucket, bool initialRestore) {
-    // TODO 2: register both properties under stable, unique ids. On a fresh
-    //         start they keep their defaults; after process death Android
-    //         hands back the saved bundle and they are filled from it.
     registerForRestoration(_draft, 'draft');
     registerForRestoration(_sortByPrice, 'sort_by_price');
     LifecycleLog.add('restoreState: draft="${_draft.value.text}", '
@@ -86,11 +84,76 @@ class _ItemsScreenState extends State<ItemsScreen>
 
   /// Menu entries that open something rather than run a test.
   void _onMenu(String which) {
-    if (which == 'lifelog') {
-      showLifecycleLog(context);
-      return;
+    switch (which) {
+      case 'lifelog':
+        showLifecycleLog(context);
+      case 'notify':
+        _notificationCheck();
+      default:
+        _runTest(which);
     }
-    _runTest(which);
+  }
+
+  /// Week 5 Part 3: check, request or test the notification permission.
+  Future<void> _notificationCheck() async {
+    final allowed = await Notifications.isEnabled();
+    LifecycleLog.add('notifications allowed: $allowed');
+    if (!mounted) return;
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Notifications'),
+        content: Text(allowed
+            ? 'Notifications are allowed for this app.'
+            : 'Notifications are NOT allowed for this app.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, 'settings'),
+              child: const Text('Open settings')),
+          if (!allowed)
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, 'request'),
+                child: const Text('Request')),
+          if (allowed)
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, 'test'),
+                child: const Text('Send test')),
+        ],
+      ),
+    );
+    String? msg;
+    switch (choice) {
+      case 'request':
+        // Time the call: a very fast "false" means Android showed no dialog.
+        final sw = Stopwatch()..start();
+        final granted = await Notifications.request();
+        sw.stop();
+        msg = 'Request returned $granted after ${sw.elapsedMilliseconds} ms';
+        // TODO 3: a refusal is final from the app's side, so point the user at
+        //         the one place they can change it: the app's settings page.
+        if (!granted) {
+          LifecycleLog.add(msg);
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('$msg. Notifications are off: you can turn them '
+                'on in the app settings.'),
+            action: SnackBarAction(
+                label: 'Settings', onPressed: Notifications.openSettings),
+          ));
+          return;
+        }
+      case 'test':
+        await Notifications.show(
+            id: 1, title: 'MCS4302', body: 'Test notification from the app');
+        msg = 'Test notification sent';
+      case 'settings':
+        await Notifications.openSettings();
+    }
+    if (msg == null) return;
+    LifecycleLog.add(msg);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
   }
 
   void _refresh() {
@@ -220,6 +283,7 @@ class _ItemsScreenState extends State<ItemsScreen>
             onSelected: _onMenu,
             itemBuilder: (_) => const [
               PopupMenuItem(value: 'lifelog', child: Text('Lifecycle log')),
+              PopupMenuItem(value: 'notify', child: Text('Notifications')),
               PopupMenuDivider(),
               PopupMenuItem(value: 'slow', child: Text('Test /slow (3 s)')),
               PopupMenuItem(value: 'flaky', child: Text('Test /flaky (30%)')),
