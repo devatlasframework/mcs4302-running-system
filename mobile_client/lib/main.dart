@@ -3,9 +3,13 @@ import 'package:flutter/material.dart';
 import 'api/api_client.dart';
 import 'api/api_exceptions.dart';
 import 'experiment_screen.dart';
+import 'lifecycle_log.dart';
 import 'models/item.dart';
 
-void main() => runApp(const App());
+void main() {
+  LifecycleLog.add('process started: main()');
+  runApp(const App());
+}
 
 class App extends StatelessWidget {
   const App({super.key});
@@ -25,21 +29,50 @@ class ItemsScreen extends StatefulWidget {
   State<ItemsScreen> createState() => _ItemsScreenState();
 }
 
-class _ItemsScreenState extends State<ItemsScreen> {
+// Week 5 Part 1: WidgetsBindingObserver delivers app lifecycle changes.
+class _ItemsScreenState extends State<ItemsScreen> with WidgetsBindingObserver {
   final api = ApiClient();
   late Future<List<Item>> _future;
   bool _busy = false;
 
-  @override
-  void dispose() {
-    api.close();
-    super.dispose();
-  }
+  // UI state that exists ONLY in memory. Part 2 tests whether it survives.
+  final _draft = TextEditingController();
+  bool _sortByPrice = false;
 
   @override
   void initState() {
     super.initState();
+    // TODO 1a: observe app lifecycle changes from now on.
+    WidgetsBinding.instance.addObserver(this);
+    LifecycleLog.add('ItemsScreen created (initState)');
     _future = api.getItems();
+  }
+
+  @override
+  void dispose() {
+    LifecycleLog.add('ItemsScreen disposed');
+    // TODO 1b: stop observing, or the binding keeps a dead State alive.
+    WidgetsBinding.instance.removeObserver(this);
+    _draft.dispose();
+    api.close();
+    super.dispose();
+  }
+
+  /// Called by the framework whenever the app's lifecycle state changes:
+  /// resumed, inactive, hidden, paused or detached.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // TODO 1c: record every transition, in order, with a timestamp.
+    LifecycleLog.add('state -> ${state.name}');
+  }
+
+  /// Menu entries that open something rather than run a test.
+  void _onMenu(String which) {
+    if (which == 'lifelog') {
+      showLifecycleLog(context);
+      return;
+    }
+    _runTest(which);
   }
 
   void _refresh() {
@@ -166,8 +199,10 @@ class _ItemsScreenState extends State<ItemsScreen> {
           IconButton(icon: const Icon(Icons.refresh), onPressed: _busy ? null : _refresh),
           PopupMenuButton<String>(
             enabled: !_busy,
-            onSelected: _runTest,
+            onSelected: _onMenu,
             itemBuilder: (_) => const [
+              PopupMenuItem(value: 'lifelog', child: Text('Lifecycle log')),
+              PopupMenuDivider(),
               PopupMenuItem(value: 'slow', child: Text('Test /slow (3 s)')),
               PopupMenuItem(value: 'flaky', child: Text('Test /flaky (30%)')),
               PopupMenuItem(value: 'bad', child: Text('Test /bad-json')),
@@ -196,7 +231,30 @@ class _ItemsScreenState extends State<ItemsScreen> {
       ),
       floatingActionButton: FloatingActionButton(
           onPressed: _busy ? null : _addItem, child: const Icon(Icons.add)),
-      body: FutureBuilder<List<Item>>(
+      body: Column(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: TextField(
+            controller: _draft,
+            decoration: const InputDecoration(
+              labelText: 'Draft note (kept in memory only)',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ),
+        SwitchListTile(
+          title: const Text('Sort by price'),
+          value: _sortByPrice,
+          onChanged: (v) => setState(() => _sortByPrice = v),
+        ),
+        const Divider(height: 1),
+        Expanded(child: _itemList()),
+      ]),
+    );
+  }
+
+  Widget _itemList() {
+    return FutureBuilder<List<Item>>(
         future: _future,
         builder: (context, snap) {
           if (snap.connectionState != ConnectionState.done) {
@@ -210,7 +268,8 @@ class _ItemsScreenState extends State<ItemsScreen> {
               ),
             );
           }
-          final items = snap.data!;
+          final items = [...snap.data!];
+          if (_sortByPrice) items.sort((a, b) => a.price.compareTo(b.price));
           return ListView.builder(
             itemCount: items.length,
             itemBuilder: (_, i) => ListTile(
@@ -220,7 +279,6 @@ class _ItemsScreenState extends State<ItemsScreen> {
             ),
           );
         },
-      ),
     );
   }
 }
